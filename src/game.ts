@@ -3,6 +3,7 @@ import {
   MATS, MAT_IDS, BUILDING_IDS, def,
   type Mat, type Cost, type BuildingType,
 } from './data';
+import { genTasks, newToday, taskProgress, STARS_PER_LEVEL, type Task, type Today } from './tasks';
 
 export interface Building {
   uid: number; type: BuildingType; c: number; r: number;
@@ -23,13 +24,23 @@ export interface Visitor {
   used: number;
   frustrated: boolean;
   face: string;
+  thought: Thought | null;
+  thoughtT: number; // 气泡剩余显示时间
+  thinkCd: number; // 下次冒想法的倒计时
 }
+
+export type ThoughtKind = 'happy' | 'hungry' | 'dirty' | 'crowded' | 'broke' | 'want';
+export interface Thought { k: ThoughtKind; type?: BuildingType }
+
+export type GameEvent =
+  | { e: 'pay'; n: number } | { e: 'splash' } | { e: 'recycle' } | { e: 'levelup'; level: number };
 
 export type FloatIcon = 'coin' | Mat;
 export interface Floater { x: number; y: number; n: number; icon: FloatIcon; t: number }
 
 export interface DayReport {
   day: number; income: number; visitors: number; rating: number; unlocked: BuildingType[];
+  tasksDone: number; autoClaimed: number;
 }
 
 export interface State {
@@ -41,7 +52,9 @@ export interface State {
   time: number;
   prices: Record<Mat, number>;
   nextUid: number;
-  today: { income: number; visitors: number; happy: number; unhappy: number };
+  today: Today;
+  tasks: Task[];
+  stars: number;
   totalVisitors: number;
   tutorial: number; // 新手引导进行到第几步，-1 = 已完成
 }
@@ -57,6 +70,7 @@ export const rt = {
   speed: 1,
   onDayEnd: null as ((r: DayReport) => void) | null,
   onChange: null as (() => void) | null,
+  onEvent: null as ((ev: GameEvent) => void) | null,
 };
 
 function newState(): State {
@@ -69,14 +83,19 @@ function newState(): State {
     time: 0,
     prices: rollPrices(),
     nextUid: 1,
-    today: { income: 0, visitors: 0, happy: 0, unhappy: 0 },
+    today: newToday(),
+    tasks: [],
+    stars: 0,
     totalVisitors: 0,
     tutorial: 0,
   };
+  s.tasks = genTasks(1, unlockedOn(1), false);
   // 开局送一个泳池
   s.buildings.push({ uid: s.nextUid++, type: 'pool', c: 3, r: 5, level: 1, earned: 0, cd: 0 });
   return s;
 }
+
+function unlockedOn(day: number) { return BUILDING_IDS.filter(id => def(id).unlockDay <= day); }
 
 function rollPrices(): Record<Mat, number> {
   const p = {} as Record<Mat, number>;
@@ -95,6 +114,9 @@ export function load(): boolean {
     if (raw) {
       // 引导功能上线前的老存档不再弹引导
       S = { ...newState(), tutorial: -1, ...JSON.parse(raw) };
+      // 老存档补上新字段
+      S.today = { ...newToday(), ...S.today };
+      if (!S.tasks?.length) S.tasks = genTasks(S.day, unlockedOn(S.day), S.buildings.length > 0);
       return true;
     }
   } catch { S = newState(); }
@@ -133,6 +155,7 @@ export function buy(m: Mat, n: number): boolean {
   if (S.coins < total) return false;
   S.coins -= total;
   S.mats[m] += n;
+  S.today.bought += n;
   rt.onChange?.();
   return true;
 }
@@ -154,6 +177,7 @@ export function place(t: BuildingType, c: number, r: number): boolean {
   if (!canPlace(c, r) || !canAfford(d.cost) || !isUnlocked(t)) return false;
   pay(d.cost);
   S.buildings.push({ uid: S.nextUid++, type: t, c, r, level: 1, earned: 0, cd: 0 });
+  S.today.builds[t] = (S.today.builds[t] ?? 0) + 1;
   // 压在新建筑下的垃圾直接清掉
   S.trash = S.trash.filter(x => !(x.c === c && x.r === r));
   rt.onChange?.();
@@ -186,6 +210,7 @@ export function upgrade(b: Building): boolean {
   if (!cost || !canAfford(cost)) return false;
   pay(cost);
   b.level++;
+  S.today.upgrades++;
   rt.onChange?.();
   return true;
 }
@@ -194,6 +219,27 @@ export function demolish(b: Building) {
   S.buildings = S.buildings.filter(x => x !== b);
   for (const v of rt.visitors) if (v.target === b.uid) { v.target = null; v.state = 'walk'; chooseNext(v); }
   rt.onChange?.();
+}
+
+// ---------- 任务 / 乐园等级 ----------
+export function parkLevel() { return 1 + Math.floor(S.stars / STARS_PER_LEVEL); }
+export function ticket() { return TICKET + parkLevel() - 1; }
+
+function grant(cost: Cost) { refund(cost, 1); }
+
+export function claimTask(i: number): boolean {
+  const t = S.tasks[i];
+  if (!t || t.claimed || taskProgress(t, S.today) < t.n) return false;
+  t.claimed = true;
+  grant(t.reward);
+  const before = parkLevel();
+  S.stars++;
+  if (parkLevel() > before) rt.onEvent?.({ e: 'levelup', level: parkLevel() });
+  rt.onChange?.();
+  return true;
+}
+export function claimableCount() {
+  return S.tasks.filter(t => !t.claimed && taskProgress(t, S.today) >= t.n).length;
 }
 
 export function parkAppeal() {
@@ -216,6 +262,7 @@ export function collectTrashAt(c: number, r: number): number {
   const n = before - S.trash.length;
   if (n > 0) {
     S.mats.plastic += n;
+    S.today.trash += n;
     float(c, r, n, 'plastic');
     rt.onChange?.();
   }
@@ -286,7 +333,27 @@ function chooseNext(v: Visitor) {
     cands.splice(i, 1);
   }
   v.frustrated = true;
+  const affordable = S.buildings.some(b => def(b.type).kind !== 'util' && stats(b).fee <= v.money);
+  think(v, { k: affordable ? 'crowded' : 'broke' });
   goLeave(v);
+}
+
+function think(v: Visitor, t: Thought) {
+  v.thought = t;
+  v.thoughtT = 2.6;
+  v.thinkCd = 7 + Math.random() * 8;
+  S.today.thoughts[t.k] = (S.today.thoughts[t.k] ?? 0) + 1;
+}
+
+/** 走路时偶尔冒个念头：脏、饿、想玩没有的项目 */
+function idleThought(v: Visitor) {
+  const [c, r] = tileOf(v);
+  const dirt = S.trash.filter(x => Math.abs(x.c - c) <= 1 && Math.abs(x.r - r) <= 1).length;
+  if (dirt >= 2) return think(v, { k: 'dirty' });
+  if (v.used >= 1 && !S.buildings.some(b => def(b.type).kind === 'food') && Math.random() < 0.5) return think(v, { k: 'hungry' });
+  const missing = (['slide', 'wave', 'tower'] as BuildingType[]).filter(t => isUnlocked(t) && !S.buildings.some(b => b.type === t));
+  if (missing.length && Math.random() < 0.3) return think(v, { k: 'want', type: missing[Math.floor(Math.random() * missing.length)] });
+  v.thinkCd = 4 + Math.random() * 6;
 }
 
 function finishVisitor(v: Visitor) {
@@ -304,8 +371,9 @@ function spawn() {
     money: Math.round(15 + Math.random() * 35 + S.day * 4),
     used: 0, frustrated: false,
     face: FACES[Math.floor(Math.random() * FACES.length)],
+    thought: null, thoughtT: 0, thinkCd: 3 + Math.random() * 6,
   };
-  earn(TICKET, GATE.c, GATE.r);
+  earn(ticket(), GATE.c, GATE.r);
   S.today.visitors++;
   S.totalVisitors++;
   rt.visitors.push(v);
@@ -317,6 +385,7 @@ function earn(n: number, c: number, r: number) {
   S.coins += n;
   S.today.income += n;
   float(c, r, n, 'coin');
+  rt.onEvent?.({ e: 'pay', n });
 }
 
 function float(c: number, r: number, n: number, icon: FloatIcon) {
@@ -325,7 +394,11 @@ function float(c: number, r: number, n: number, icon: FloatIcon) {
 
 const SPEED = 2; // 格/秒
 
+const SWIMMY: BuildingType[] = ['pool', 'wave', 'slide', 'tower'];
+
 function updateVisitor(v: Visitor, dt: number) {
+  if (v.thought) { v.thoughtT -= dt; if (v.thoughtT <= 0) v.thought = null; }
+  else if (v.state === 'walk' && !v.leaving) { v.thinkCd -= dt; if (v.thinkCd <= 0) idleThought(v); }
   if (v.state === 'use') {
     v.timer -= dt;
     if (v.timer <= 0) {
@@ -334,6 +407,7 @@ function updateVisitor(v: Visitor, dt: number) {
       v.wants--;
       v.used++;
       if (b && Math.random() < def(b.type).trash) dropTrash(...tileOf(v));
+      if (b && def(b.type).kind !== 'rest' && Math.random() < 0.35) think(v, { k: 'happy' });
       chooseNext(v);
     }
     return;
@@ -364,6 +438,7 @@ function updateVisitor(v: Visitor, dt: number) {
   earn(st.fee, b.c, b.r);
   v.state = 'use';
   v.timer = st.useTime;
+  if (SWIMMY.includes(b.type)) rt.onEvent?.({ e: 'splash' });
 }
 
 // ---------- 主循环 ----------
@@ -398,6 +473,7 @@ export function tick(dtReal: number) {
       S.trash = S.trash.filter(x => x !== t);
       S.mats.plastic++;
       float(b.c, b.r, 1, 'plastic');
+      rt.onEvent?.({ e: 'recycle' });
     }
   }
 
@@ -411,17 +487,24 @@ function endDay() {
   for (const v of [...rt.visitors]) finishVisitor(v);
   const t = S.today;
   const served = t.happy + t.unhappy;
+  // 完成了没领的任务自动领
+  let autoClaimed = 0;
+  S.tasks.forEach((tk, i) => { if (!tk.claimed && claimTask(i)) autoClaimed++; });
   const report: DayReport = {
     day: S.day,
     income: t.income,
     visitors: t.visitors,
     rating: Math.round(100 * cleanliness() * (served ? t.happy / served : 1)),
     unlocked: BUILDING_IDS.filter(id => def(id).unlockDay === S.day + 1),
+    tasksDone: S.tasks.filter(tk => tk.claimed).length,
+    autoClaimed,
   };
   S.day++;
   S.time = 0;
   S.prices = rollPrices();
-  S.today = { income: 0, visitors: 0, happy: 0, unhappy: 0 };
+  const prev = { income: t.income, visitors: t.visitors, happy: t.happy };
+  S.today = newToday();
+  S.tasks = genTasks(S.day, unlockedOn(S.day), S.buildings.length > 0, prev);
   rt.spawnTimer = 2;
   save();
   rt.onDayEnd?.(report);

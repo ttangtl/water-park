@@ -472,3 +472,113 @@ export function thumbURL(type: BuildingType, px = 112): string {
   }
   return iconCache.get(key)!;
 }
+
+// ---------- 游客想法气泡 ----------
+export type BubbleKind = 'happy' | 'hungry' | 'dirty' | 'crowded' | 'broke' | 'want';
+
+/** (x, y) 是游客头顶；pop 0→1 是弹出动画进度 */
+export function drawThought(g: C, kind: BubbleKind, x: number, y: number, T: number, t: number, pop: number, want?: BuildingType) {
+  const R = T * 0.28 * (pop < 1 ? 0.5 + pop * 0.5 + Math.sin(pop * Math.PI) * 0.15 : 1);
+  const cx = x + T * 0.14, cy = y - T * 0.46 + Math.sin(t * 3) * T * 0.015;
+  const lw = Math.max(1.5, T * 0.03);
+  g.save();
+  g.globalAlpha = Math.min(1, pop * 3);
+  // 尾巴小圆点
+  for (const [dx, dy, r] of [[0.02, 0.2, 0.035], [0.07, 0.12, 0.05]] as [number, number, number][]) {
+    g.beginPath(); g.arc(x + T * dx, y - T * dy, T * r, 0, TAU); fillStroke(g, '#fff', lw * 0.8);
+  }
+  g.beginPath(); g.arc(cx, cy, R, 0, TAU); fillStroke(g, '#fff', lw);
+  const s = R * 0.62;
+  switch (kind) {
+    case 'happy': {
+      g.beginPath();
+      g.moveTo(cx, cy + s * 0.75);
+      g.bezierCurveTo(cx - s * 1.3, cy - s * 0.1, cx - s * 0.55, cy - s * 1.05, cx, cy - s * 0.35);
+      g.bezierCurveTo(cx + s * 0.55, cy - s * 1.05, cx + s * 1.3, cy - s * 0.1, cx, cy + s * 0.75);
+      fillStroke(g, '#ff5d7a', lw * 0.8);
+      g.fillStyle = 'rgba(255,255,255,.7)'; g.beginPath(); g.arc(cx - s * 0.4, cy - s * 0.3, s * 0.14, 0, TAU); g.fill();
+      break;
+    }
+    case 'hungry': {
+      g.beginPath(); g.moveTo(cx - s * 0.45, cy - s * 0.05); g.lineTo(cx + s * 0.45, cy - s * 0.05); g.lineTo(cx, cy + s * 0.95); g.closePath();
+      fillStroke(g, '#e8a75d', lw * 0.8);
+      g.beginPath(); g.arc(cx, cy - s * 0.25, s * 0.5, 0, TAU); fillStroke(g, '#ffc2d4', lw * 0.8);
+      g.fillStyle = PAL.coral; g.beginPath(); g.arc(cx + s * 0.1, cy - s * 0.72, s * 0.14, 0, TAU); g.fill();
+      break;
+    }
+    case 'dirty': {
+      drawTrash(g, cx, cy + s * 0.25, T * 0.9, 1);
+      g.strokeStyle = '#6fae3a'; g.lineWidth = lw; g.lineCap = 'round';
+      for (const dx of [-0.45, 0, 0.45]) {
+        g.beginPath();
+        g.moveTo(cx + s * dx, cy - s * 0.25);
+        g.quadraticCurveTo(cx + s * (dx + 0.2), cy - s * 0.55, cx + s * dx, cy - s * 0.8);
+        g.stroke();
+      }
+      break;
+    }
+    case 'crowded': {
+      g.beginPath(); g.arc(cx, cy, s * 0.85, 0, TAU); fillStroke(g, PAL.sun, lw * 0.8);
+      g.strokeStyle = INK; g.lineWidth = lw * 0.9; g.lineCap = 'round';
+      g.beginPath(); // 皱眉
+      g.moveTo(cx - s * 0.5, cy - s * 0.38); g.lineTo(cx - s * 0.18, cy - s * 0.22);
+      g.moveTo(cx + s * 0.5, cy - s * 0.38); g.lineTo(cx + s * 0.18, cy - s * 0.22);
+      g.moveTo(cx - s * 0.35, cy + s * 0.42); g.quadraticCurveTo(cx, cy + s * 0.15, cx + s * 0.35, cy + s * 0.42);
+      g.stroke();
+      g.fillStyle = INK;
+      g.beginPath(); g.arc(cx - s * 0.3, cy - s * 0.02, s * 0.09, 0, TAU); g.arc(cx + s * 0.3, cy - s * 0.02, s * 0.09, 0, TAU); g.fill();
+      g.fillStyle = '#7fd0f0'; g.beginPath(); g.ellipse(cx + s * 0.7, cy - s * 0.55, s * 0.13, s * 0.2, 0, 0, TAU); g.fill();
+      break;
+    }
+    case 'broke': {
+      drawIcon(g, 'coin', cx, cy, s * 1.9);
+      g.strokeStyle = '#e2453c'; g.lineWidth = lw * 1.6; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(cx - s * 0.7, cy - s * 0.7); g.lineTo(cx + s * 0.7, cy + s * 0.7); g.stroke();
+      break;
+    }
+    case 'want': {
+      if (want) {
+        const bt = R * 1.25;
+        g.save(); g.beginPath(); g.arc(cx, cy, R - lw, 0, TAU); g.clip();
+        const top = want === 'tower' ? 0.75 : want === 'slide' ? 0.3 : 0.1;
+        const bt2 = want === 'tower' ? bt * 0.62 : bt;
+        drawBuilding(g, want, cx - bt2 / 2, cy - bt2 * (1 + top) / 2 + bt2 * top, bt2, t);
+        g.restore();
+      }
+      break;
+    }
+  }
+  g.restore();
+}
+
+/** 任务和心声列表里用的小图标 */
+export function badgeURL(kind: string, px = 64): string {
+  const key = `t:${kind}:${px}`;
+  if (!iconCache.has(key)) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = px;
+    const g = cv.getContext('2d')!;
+    const T = px * 0.9, cx = px / 2, cy = px / 2;
+    switch (kind) {
+      case 'visitors': drawVisitor(g, cx, cy + px * 0.08, px * 1.9, 7, 0, 'stand'); break;
+      case 'income': drawIcon(g, 'coin', cx, cy, px * 0.9); break;
+      case 'trash': drawTrash(g, cx - px * 0.15, cy + px * 0.05, px * 2.2, 1); drawTrash(g, cx + px * 0.18, cy + px * 0.12, px * 2, 2); break;
+      case 'buy': drawIcon(g, 'plastic', cx - px * 0.18, cy, px * 0.7); drawIcon(g, 'metal', cx + px * 0.18, cy + px * 0.12, px * 0.6); break;
+      case 'upgrade': {
+        g.beginPath();
+        g.moveTo(cx, cy - px * 0.38); g.lineTo(cx + px * 0.32, cy); g.lineTo(cx + px * 0.13, cy); g.lineTo(cx + px * 0.13, cy + px * 0.36);
+        g.lineTo(cx - px * 0.13, cy + px * 0.36); g.lineTo(cx - px * 0.13, cy); g.lineTo(cx - px * 0.32, cy); g.closePath();
+        fillStroke(g, PAL.palm, px * 0.06);
+        break;
+      }
+      default: // 想法类：直接画气泡内容
+      {
+        // 让气泡本体刚好居中占满图标（尾巴小圆点会落在画布外）
+        const BT = px * 1.5;
+        drawThought(g, kind as BubbleKind, cx - BT * 0.14, cy + BT * 0.46, BT, 0, 1, kind === 'want' ? 'slide' : undefined);
+      }
+    }
+    iconCache.set(key, cv.toDataURL());
+  }
+  return iconCache.get(key)!;
+}

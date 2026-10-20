@@ -1,6 +1,6 @@
 import { COLS, ROWS, GATE, OPEN_LEN, DAY_LEN, type BuildingType } from './data';
 import { S, rt, canPlace, stats, type Building, type Visitor } from './game';
-import { INK, drawBuilding, drawGate, drawVisitor, drawTrash, drawScenery, drawSea, drawIcon } from './art';
+import { INK, drawBuilding, drawGate, drawVisitor, drawTrash, drawScenery, drawSea, drawIcon, drawThought } from './art';
 
 export const view = {
   tile: 48, ox: 0, oy: 0, W: 0, H: 0, sea: 0,
@@ -119,6 +119,7 @@ export function draw(now: number) {
   items.push({ k: GATE.r + 0.9, fn: () => drawGate(ctx, ox + GATE.c * T, oy + GATE.r * T, T) });
 
   const slots = new Map<number, number>();
+  const bubbles: { v: Visitor; x: number; y: number }[] = [];
   for (const v of rt.visitors) {
     const b = v.state === 'use' && v.target != null ? S.buildings.find(x => x.uid === v.target) : undefined;
     if (b) {
@@ -127,7 +128,9 @@ export function draw(now: number) {
       const p = usePose(v, b, i, T);
       const k = p.mode === 'swim' ? b.r + 0.91 : (p.y - oy) / T + 0.2;
       items.push({ k, fn: () => drawVisitor(ctx, p.x, p.y, T, v.uid, t, p.mode) });
+      if (v.thought) bubbles.push({ v, x: p.x, y: p.y - T * (p.mode === 'swim' ? 0.08 : 0.2) });
     } else {
+      if (v.thought) bubbles.push({ v, x: ox + (v.x + 0.5) * T, y: oy + (v.y + 0.42) * T - T * 0.2 });
       items.push({
         k: v.y + 0.55,
         fn: () => drawVisitor(ctx, ox + (v.x + 0.5) * T, oy + (v.y + 0.42) * T, T, v.uid, t, v.path.length ? 'walk' : 'stand'),
@@ -147,6 +150,13 @@ export function draw(now: number) {
   }
   items.sort((a, b) => a.k - b.k);
   for (const it of items) it.fn();
+
+  // 想法气泡永远画在最上层
+  for (const { v, x, y } of bubbles) {
+    const th = v.thought!;
+    const age = 2.6 - v.thoughtT;
+    drawThought(ctx, th.k, x, y, T, t, Math.min(1, age / 0.25), th.type);
+  }
 
   // 打烊时的夕阳色
   if (S.time > OPEN_LEN - 10) {

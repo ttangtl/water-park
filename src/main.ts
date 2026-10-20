@@ -1,23 +1,27 @@
 import './style.css';
 import {
-  MATS, MAT_IDS, BUILDING_IDS, DAY_LEN, OPEN_LEN, TICKET, def,
+  MATS, MAT_IDS, BUILDING_IDS, DAY_LEN, OPEN_LEN, def,
   type Cost, type Mat, type BuildingType,
 } from './data';
 import {
   S, rt, load, save, resetGame, tick, canAfford, buy, place, buildingAt, collectTrashAt,
   isUnlocked, stats, upgradeCost, upgrade, demolish, occupancy, parkAppeal, cleanliness,
+  claimTask, claimableCount, parkLevel, ticket,
   type DayReport,
 } from './game';
+import { taskText, taskProgress, STARS_PER_LEVEL } from './tasks';
+import { sfx, audio, unlockAudio, setSound, setMusic } from './sfx';
 import { initRender, draw, view, tileFromEvent, resize } from './render';
-import { iconURL, thumbURL } from './art';
+import { iconURL, thumbURL, badgeURL } from './art';
 import { showStart, startTutorial, tutorialEvent } from './intro';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 const resEl = $('#res'), dayEl = $('#day'), dayBar = $('#daybar'), hintEl = $('#hint');
 const sheet = $('#sheet'), modal = $('#modal'), speedBtn = $('#speed');
 const canvas = $<HTMLCanvasElement>('#cv');
+const taskBtn = $('#taskbtn'), taskBadge = $('#taskbtn .badge'), muteBtn = $('#mute');
 
-type Tab = 'build' | 'market' | 'park' | 'building' | null;
+type Tab = 'build' | 'market' | 'park' | 'tasks' | 'building' | null;
 let tab: Tab = null;
 let paused = true; // 开始画面点了才开始跑
 let hintTimer = 0;
@@ -25,6 +29,7 @@ let hintTimer = 0;
 // ---------- 工具 ----------
 const ico = (k: 'coin' | Mat, cls = 'ico') => `<img class="${cls}" src="${iconURL(k)}" alt="">`;
 const thumb = (t: BuildingType, cls = 'thumb') => `<img class="${cls}" src="${thumbURL(t)}" alt="">`;
+const badge = (k: string, cls = 'thumb sm') => `<img class="${cls}" src="${badgeURL(k)}" alt="">`;
 
 function costHTML(cost: Cost) {
   return Object.entries(cost).map(([k, v]) => {
@@ -33,7 +38,8 @@ function costHTML(cost: Cost) {
     return `<span class="${have < (v ?? 0) ? 'lack' : ''}">${ico(key)}${v}</span>`;
   }).join('');
 }
-function hint(text: string, sticky = false) {
+function hint(text: string, sticky = false, bad = false) {
+  if (bad) sfx.error();
   hintEl.textContent = text;
   hintEl.className = (text ? 'show ' : '') + (sticky ? 'sticky' : '');
   hintTimer = sticky ? Infinity : 2.5;
@@ -68,6 +74,9 @@ function renderTop() {
   dayEl.innerHTML = `<b>第${S.day}天</b><small>${closing ? '打烊中' : '营业中'}</small>`;
   dayBar.style.width = `${(S.time / DAY_LEN) * 100}%`;
   dayBar.classList.toggle('closing', closing);
+  const n = claimableCount();
+  taskBadge.textContent = n ? String(n) : '';
+  taskBtn.classList.toggle('ready', n > 0);
 }
 
 // ---------- 底部面板 ----------
@@ -78,6 +87,7 @@ function renderSheet(force = false) {
   if (tab === 'build') html = buildHTML();
   else if (tab === 'market') html = marketHTML();
   else if (tab === 'park') html = parkHTML();
+  else if (tab === 'tasks') html = tasksHTML();
   else if (tab === 'building') {
     const b = S.buildings.find(x => x.uid === view.selected);
     if (!b) return openTab(null);
@@ -121,12 +131,43 @@ function marketHTML() {
     <p class="tip">价格每天变动。点地上的垃圾可以分拣出塑料 ${ico('plastic', 'ico sm')}</p>`;
 }
 
+function tasksHTML() {
+  const lv = parkLevel(), inLv = S.stars % STARS_PER_LEVEL;
+  const rows = S.tasks.map((t, i) => {
+    const p = Math.min(taskProgress(t, S.today), t.n), done = p >= t.n;
+    const icon = t.kind === 'build' ? thumb(t.type!, 'thumb sm') : badge(t.kind);
+    const right = t.claimed ? `<span class="got">✓ 已领</span>`
+      : `<button class="btn ${done ? 'go' : 'ghost'}" data-act="claim" data-id="${i}" ${done ? '' : 'disabled'}>领取</button>`;
+    return `<div class="row task ${t.claimed ? 'claimed' : done ? 'done' : ''}">${icon}
+      <div class="main"><b>${taskText(t)}</b>
+        <div class="prog"><i style="width:${(p / t.n) * 100}%"></i><span>${p}/${t.n}</span></div>
+        <div class="cost">${costHTML(t.reward).replace(/class="lack"/g, '')}</div></div>${right}</div>`;
+  }).join('');
+  const stars = Array.from({ length: STARS_PER_LEVEL }, (_, i) => `<span class="${i < inLv ? 'on' : ''}">★</span>`).join('');
+  return `${head('今日任务')}
+    <div class="lvcard"><div class="lv"><small>乐园</small><b>Lv${lv}</b></div>
+      <div class="lvinfo"><div class="lvstars">${stars}</div><small>每完成 1 个任务得 1 颗星，集满 ${STARS_PER_LEVEL} 颗乐园升级，门票 +1（现在 ${ticket()}）</small></div></div>
+    ${rows}
+    <p class="tip">任务每天刷新；完成了没领的，打烊时自动发给你。</p>`;
+}
+
+const MOOD: Record<string, [string, string]> = {
+  happy: ['玩得很开心', '继续保持！'],
+  hungry: ['肚子饿了', '建个冰淇淋摊'],
+  dirty: ['地上好脏', '多捡垃圾，或者建回收站'],
+  crowded: ['人太多玩不上', '多建设施，或升级加容量'],
+  broke: ['钱不够玩', '多建便宜的设施'],
+  want: ['想玩新项目', '建滑梯、造浪池这些大设施'],
+};
+
 function parkHTML() {
   const t = S.today;
   const top = [...S.buildings].sort((a, b) => b.earned - a.earned).slice(0, 5)
     .filter(b => b.earned > 0)
     .map((b, i) => `<div class="row"><span class="rank">${i + 1}</span>${thumb(b.type, 'thumb sm')}
       <div class="main"><b>${def(b.type).name}</b> <em class="tag">Lv${b.level}</em><small>累计收入 ${ico('coin', 'ico sm')}${b.earned}</small></div></div>`).join('');
+  const moods = Object.entries(t.thoughts).filter(([, n]) => n).sort((a, b) => b[1]! - a[1]!)
+    .map(([k, n]) => `<div class="row">${badge(k)}<div class="main"><b>${MOOD[k][0]}</b> <em class="tag">${n} 次</em><small>${MOOD[k][1]}</small></div></div>`).join('');
   return `${head('我的乐园')}
     <div class="stats">
       <div><b>${t.income}</b><small>今日收入</small></div>
@@ -136,8 +177,12 @@ function parkHTML() {
       <div><b>${Math.round(cleanliness() * 100)}%</b><small>清洁度</small></div>
       <div><b>${S.totalVisitors}</b><small>总游客</small></div>
     </div>
-    <p class="tip">门票 ${ico('coin', 'ico sm')}${TICKET}/人。吸引力越高来的人越多；地上垃圾多了游客会变少。</p>
+    <p class="tip">乐园 Lv${parkLevel()} · 门票 ${ico('coin', 'ico sm')}${ticket()}/人。吸引力越高来的人越多；地上垃圾多了游客会变少。</p>
+    ${moods ? `<div class="sub">今日游客心声</div>${moods}` : ''}
     ${top ? `<div class="sub">赚钱排行</div>${top}` : ''}
+    <div class="sub">设置</div>
+    <div class="row"><div class="main"><b>音效</b></div><button class="toggle ${audio.sound ? 'on' : ''}" data-act="sound"><i></i></button></div>
+    <div class="row"><div class="main"><b>背景音乐</b></div><button class="toggle ${audio.music ? 'on' : ''}" data-act="music"><i></i></button></div>
     <div class="actions"><button class="btn danger" data-act="reset">重新开始</button></div>`;
 }
 
@@ -172,6 +217,8 @@ function buildingHTML(b: (typeof S.buildings)[number]) {
 function openTab(t: Tab) {
   const prev = tab;
   tab = t;
+  if (t && t !== prev) sfx.tap();
+  taskBtn.classList.toggle('on', t === 'tasks');
   if (t === 'build' && prev !== 'build') tutorialEvent('open-build');
   if (prev === 'build' && t !== 'build' && !view.placing) tutorialEvent('close-build');
   if (t !== 'building') view.selected = null;
@@ -202,20 +249,25 @@ sheet.addEventListener('click', e => {
   if (act === 'close') return openTab(null);
   if (act === 'pick') {
     const t = id as BuildingType, d = def(t);
-    if (!isUnlocked(t)) return hint(`${d.name}第 ${d.unlockDay} 天解锁`);
-    if (!canAfford(d.cost)) return hint(lackText(d.cost));
+    if (!isUnlocked(t)) return hint(`${d.name}第 ${d.unlockDay} 天解锁`, false, true);
+    if (!canAfford(d.cost)) return hint(lackText(d.cost), false, true);
     view.placing = t;
     openTab(null);
     hint(`点绿色格子放置「${d.name}」`, true);
     tutorialEvent('pick');
   }
   if (act === 'buy') {
-    if (buy(id as Mat, Number(el.dataset.n))) renderSheet(true);
+    if (buy(id as Mat, Number(el.dataset.n))) { sfx.coin(); renderSheet(true); }
   }
+  if (act === 'claim') {
+    if (claimTask(Number(id))) { sfx.claim(); save(); renderSheet(true); }
+  }
+  if (act === 'sound') { setSound(!audio.sound); renderMute(); renderSheet(true); }
+  if (act === 'music') { setMusic(!audio.music); renderMute(); renderSheet(true); }
   if (act === 'upgrade' || act === 'demolish') {
     const b = S.buildings.find(x => x.uid === view.selected);
     if (!b) return;
-    if (act === 'upgrade') { if (upgrade(b)) hint(`${def(b.type).name}升到 Lv${b.level}！`); }
+    if (act === 'upgrade') { if (upgrade(b)) { sfx.upgrade(); hint(`${def(b.type).name}升到 Lv${b.level}！`); } }
     else { demolish(b); openTab(null); hint('已拆除，返还了一半材料'); }
     renderSheet(true);
   }
@@ -230,6 +282,7 @@ canvas.addEventListener('pointerdown', e => {
     const t = view.placing;
     if (place(t, c, r)) {
       hint(`${def(t).name}建好了！`);
+      sfx.build();
       view.placing = null;
       save();
       tutorialEvent('placed');
@@ -238,9 +291,36 @@ canvas.addEventListener('pointerdown', e => {
   }
   const b = buildingAt(c, r);
   if (b) { view.selected = b.uid; openTab('building'); return; }
-  if (collectTrashAt(c, r) > 0) return;
+  if (collectTrashAt(c, r) > 0) { sfx.pop(); return; }
   if (tab) openTab(null);
 });
+
+taskBtn.addEventListener('click', () => {
+  if (view.placing) cancelPlacing();
+  openTab(tab === 'tasks' ? null : 'tasks');
+});
+
+function renderMute() {
+  const on = audio.sound || audio.music;
+  muteBtn.classList.toggle('off', !on);
+  muteBtn.setAttribute('aria-label', on ? '静音' : '打开声音');
+}
+muteBtn.addEventListener('click', () => {
+  const on = !(audio.sound || audio.music);
+  setSound(on); setMusic(on); renderMute();
+  if (tab === 'park') renderSheet(true);
+});
+renderMute();
+
+// 浏览器要第一次点击后才允许出声
+window.addEventListener('pointerdown', unlockAudio, { capture: true });
+
+rt.onEvent = ev => {
+  if (ev.e === 'pay') sfx.coin();
+  else if (ev.e === 'splash') sfx.splash();
+  else if (ev.e === 'recycle') sfx.recycle();
+  else if (ev.e === 'levelup') { sfx.fanfare(); hint(`乐园升到 Lv${ev.level}！门票涨到 ${ticket()}`); }
+};
 
 speedBtn.addEventListener('click', () => {
   rt.speed = rt.speed === 1 ? 2 : rt.speed === 2 ? 4 : 1;
@@ -250,6 +330,7 @@ speedBtn.addEventListener('click', () => {
 
 rt.onDayEnd = (r: DayReport) => {
   paused = true;
+  sfx.fanfare();
   const unlock = r.unlocked.length
     ? `<div class="unlock"><small>新设施解锁</small>${r.unlocked.map(id => `<span>${thumb(id, 'thumb sm')}${def(id).name}</span>`).join('')}</div>` : '';
   const stars = r.rating >= 85 ? 3 : r.rating >= 60 ? 2 : 1;
@@ -260,7 +341,8 @@ rt.onDayEnd = (r: DayReport) => {
       <div><b>${r.income}</b><small>收入</small></div>
       <div><b>${r.visitors}</b><small>游客</small></div>
       <div><b>${r.rating}%</b><small>满意度</small></div></div>
-    ${unlock}<p class="tip">材料市场价格已更新</p>
+    <p class="tip">完成任务 ${r.tasksDone}/3${r.autoClaimed ? `（自动领取了 ${r.autoClaimed} 个）` : ''} · 乐园 Lv${parkLevel()}</p>
+    ${unlock}<p class="tip">新任务已刷新 · 材料价格已更新</p>
     <button class="btn go big" id="next">开始第 ${r.day + 1} 天</button></div>`;
   modal.hidden = false;
   $('#next').onclick = () => { modal.hidden = true; paused = false; };

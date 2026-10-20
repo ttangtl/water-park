@@ -257,3 +257,52 @@ img { -webkit-user-drag: none; }
   background: var(--sun); border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink); transform: rotate(45deg);
   animation: nudge .8s ease-in-out infinite; }
 @keyframes nudge { 50% { translate: 0 -6px; } }
+
+/* ---------- 任务按钮（场地左上角）---------- */
+#taskbtn { position: absolute; left: 10px; top: 10px; z-index: 2; display: flex; align-items: center; gap: 4px;
+  height: 40px; padding: 0 12px 0 6px; border-radius: 14px; background: var(--paper); border: 3px solid var(--ink);
+  box-shadow: 0 4px 0 var(--ink); font-weight: 900; font-size: 15px; }
+#taskbtn:active, #taskbtn.on { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
+#taskbtn .scroll { position: relative; width: 24px; height: 26px; border-radius: 4px; background: #fff3cc; border: 2.5px solid var(--ink); }
+#taskbtn .scroll::before, #taskbtn .scroll::after { content: ''; position: absolute; left: 3px; right: 3px; height: 2.5px; border-radius: 2px; background: var(--coral); }
+#taskbtn .scroll::before { top: 5px; } #taskbtn .scroll::after { top: 11px; box-shadow: 0 6px 0 var(--coral); }
+#taskbtn .badge { position: absolute; right: -9px; top: -9px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 999px;
+  background: #ff4f4f; color: #fff; border: 2.5px solid var(--ink); font-style: normal; font-size: 12px; font-weight: 900;
+  display: none; align-items: center; justify-content: center; }
+#taskbtn.ready .badge { display: flex; }
+#taskbtn.ready { animation: wiggle 1.4s ease-in-out infinite; background: #fff3cc; }
+@keyframes wiggle { 0%, 70%, 100% { rotate: 0deg; } 76% { rotate: -6deg; } 84% { rotate: 6deg; } 92% { rotate: -3deg; } }
+
+/* ---------- 静音按钮 ---------- */
+.mute { min-width: 40px; display: flex; align-items: center; justify-content: center; }
+.mute span { width: 22px; height: 22px; background: no-repeat center / contain
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2321405a' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9h4l5-4v14l-5-4H4z' fill='%23ffc93c'/%3E%3Cpath d='M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12'/%3E%3C/svg%3E"); }
+.mute.off span { background-image:
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2321405a' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9h4l5-4v14l-5-4H4z' fill='%23d5dee4'/%3E%3Cpath d='M17 9l5 6M22 9l-5 6' stroke='%23e2453c'/%3E%3C/svg%3E"); }
+
+/* ---------- 任务面板 ---------- */
+.lvcard { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 6px; border-radius: 14px;
+  background: linear-gradient(135deg, #fff3cc, #ffe0a3); border: 2.5px solid var(--ink); box-shadow: 0 3px 0 var(--ink); }
+.lvcard .lv { flex: none; width: 58px; height: 58px; border-radius: 50%; background: var(--coral); border: 3px solid var(--ink);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; line-height: 1; }
+.lvcard .lv small { font-size: 10px; font-weight: 800; }
+.lvcard .lv b { font-size: 19px; font-weight: 900; paint-order: stroke fill; -webkit-text-stroke: 4px var(--ink); }
+.lvcard .lvinfo small { display: block; font-size: 11px; color: var(--ink-soft); line-height: 1.4; margin-top: 2px; }
+.lvstars span { font-size: 22px; color: #e6d7b0; paint-order: stroke fill; -webkit-text-stroke: 3px var(--ink); margin-right: 1px; }
+.lvstars span.on { color: var(--sun); }
+.task .main b { font-size: 14px; }
+.prog { position: relative; height: 16px; margin: 5px 0; border-radius: 999px; background: #e8eef2; border: 2px solid var(--ink); overflow: hidden; }
+.prog i { position: absolute; inset: 0 auto 0 0; border-radius: 999px; transition: width .3s;
+  background: repeating-linear-gradient(-45deg, #8be0a8 0 7px, #6fd39a 7px 14px); }
+.prog span { position: relative; display: block; text-align: center; font-size: 10px; font-weight: 900; line-height: 12px; }
+.task.done { background: linear-gradient(90deg, rgba(139,224,168,.25), transparent); border-radius: 12px; }
+.task.done .btn.go { animation: breathe 1s ease-in-out infinite; }
+.task.claimed { opacity: .55; }
+.got { font-weight: 900; color: var(--palm-deep); font-size: 13px; white-space: nowrap; }
+.task .cost span { background: #fff3cc; }
+
+/* ---------- 开关 ---------- */
+.toggle { width: 52px; height: 30px; border-radius: 999px; background: #d5dee4; border: 2.5px solid var(--ink); position: relative; transition: background .2s; }
+.toggle i { position: absolute; left: 2px; top: 2px; width: 21px; height: 21px; border-radius: 50%; background: #fff; border: 2px solid var(--ink); transition: left .2s; }
+.toggle.on { background: var(--palm); }
+.toggle.on i { left: 23px; }
