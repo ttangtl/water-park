@@ -43,6 +43,7 @@ export interface State {
   nextUid: number;
   today: { income: number; visitors: number; happy: number; unhappy: number };
   totalVisitors: number;
+  tutorial: number; // 新手引导进行到第几步，-1 = 已完成
 }
 
 const FACES = ['🧒', '👧', '👦', '👩', '👨', '🧑', '👵', '👴'];
@@ -70,6 +71,7 @@ function newState(): State {
     nextUid: 1,
     today: { income: 0, visitors: 0, happy: 0, unhappy: 0 },
     totalVisitors: 0,
+    tutorial: 0,
   };
   // 开局送一个泳池
   s.buildings.push({ uid: s.nextUid++, type: 'pool', c: 3, r: 5, level: 1, earned: 0, cd: 0 });
@@ -86,11 +88,17 @@ function rollPrices(): Record<Mat, number> {
 export function save() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch { /* 隐私模式等 */ }
 }
-export function load() {
+/** 读档；返回是否有旧存档 */
+export function load(): boolean {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (raw) S = { ...newState(), ...JSON.parse(raw) };
+    if (raw) {
+      // 引导功能上线前的老存档不再弹引导
+      S = { ...newState(), tutorial: -1, ...JSON.parse(raw) };
+      return true;
+    }
   } catch { S = newState(); }
+  return false;
 }
 export function resetGame() {
   S = newState();

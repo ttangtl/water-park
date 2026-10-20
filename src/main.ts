@@ -10,6 +10,7 @@ import {
 } from './game';
 import { initRender, draw, view, tileFromEvent, resize } from './render';
 import { iconURL, thumbURL } from './art';
+import { showStart, startTutorial, tutorialEvent } from './intro';
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 const resEl = $('#res'), dayEl = $('#day'), dayBar = $('#daybar'), hintEl = $('#hint');
@@ -18,7 +19,7 @@ const canvas = $<HTMLCanvasElement>('#cv');
 
 type Tab = 'build' | 'market' | 'park' | 'building' | null;
 let tab: Tab = null;
-let paused = false;
+let paused = true; // 开始画面点了才开始跑
 let hintTimer = 0;
 
 // ---------- 工具 ----------
@@ -169,7 +170,10 @@ function buildingHTML(b: (typeof S.buildings)[number]) {
 }
 
 function openTab(t: Tab) {
+  const prev = tab;
   tab = t;
+  if (t === 'build' && prev !== 'build') tutorialEvent('open-build');
+  if (prev === 'build' && t !== 'build' && !view.placing) tutorialEvent('close-build');
   if (t !== 'building') view.selected = null;
   document.querySelectorAll<HTMLButtonElement>('#bottom button')
     .forEach(btn => btn.classList.toggle('on', btn.dataset.tab === t));
@@ -179,6 +183,7 @@ function openTab(t: Tab) {
 function cancelPlacing() {
   view.placing = null;
   hint('');
+  tutorialEvent('cancel');
 }
 
 // ---------- 事件 ----------
@@ -202,6 +207,7 @@ sheet.addEventListener('click', e => {
     view.placing = t;
     openTab(null);
     hint(`点绿色格子放置「${d.name}」`, true);
+    tutorialEvent('pick');
   }
   if (act === 'buy') {
     if (buy(id as Mat, Number(el.dataset.n))) renderSheet(true);
@@ -214,7 +220,7 @@ sheet.addEventListener('click', e => {
     renderSheet(true);
   }
   if (act === 'reset') {
-    if (confirm('确定要清空存档重新开始吗？')) { resetGame(); openTab(null); }
+    if (confirm('确定要清空存档重新开始吗？')) { resetGame(); openTab(null); startTutorial(); }
   }
 });
 
@@ -226,6 +232,7 @@ canvas.addEventListener('pointerdown', e => {
       hint(`${def(t).name}建好了！`);
       view.placing = null;
       save();
+      tutorialEvent('placed');
     } else cancelPlacing();
     return;
   }
@@ -262,8 +269,14 @@ rt.onDayEnd = (r: DayReport) => {
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
 
 // ---------- 主循环 ----------
-load();
+const hasSave = load();
 initRender(canvas);
+showStart(hasSave, fresh => {
+  if (fresh) resetGame();
+  paused = false;
+  last = performance.now();
+  setTimeout(startTutorial, 500);
+});
 requestAnimationFrame(resize);
 let last = performance.now(), uiAcc = 0, saveAcc = 0;
 function frame(now: number) {
