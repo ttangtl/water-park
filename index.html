@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#2aa7d8" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="水上乐园" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" />
+  <title>水上乐园</title>
+</head>
+<body>
+  <div id="app">
+    <header id="top">
+      <div class="res" id="res"></div>
+      <div class="dayrow">
+        <div id="day" class="daybadge"></div>
+        <div class="bar"><div id="daybar"></div></div>
+        <button id="speed" class="speed" aria-label="速度">×1</button>
+      </div>
+    </header>
+    <main id="field">
+      <canvas id="cv"></canvas>
+      <div id="hint"></div>
+    </main>
+    <nav id="bottom">
+      <button data-tab="build" class="b-build"><img data-thumb="slide" alt=""><span>建造</span></button>
+      <button data-tab="market" class="b-market"><img data-icon="metal" alt=""><span>材料</span></button>
+      <button data-tab="park" class="b-park"><img data-thumb="umbrella" alt=""><span>乐园</span></button>
+    </nav>
+    <section id="sheet"></section>
+    <div id="modal" hidden></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

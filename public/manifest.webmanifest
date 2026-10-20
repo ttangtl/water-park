@@ -1,0 +1,10 @@
+{
+  "name": "水上乐园",
+  "short_name": "水上乐园",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#e9f6fb",
+  "theme_color": "#4aa3df",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
